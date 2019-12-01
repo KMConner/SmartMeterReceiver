@@ -1,5 +1,4 @@
 import logging
-import time
 from typing import Optional, Tuple
 
 from serial import Serial
@@ -12,26 +11,40 @@ class SmartMeterConnection:
         self.__key = key
         self.__serial_logger = logging.getLogger('connection')
         self.__logger = logging.getLogger(__name__)
+        self.__connection: Optional[Serial] = None
+        self.__link_local_addr: Optional[str] = None
 
-    def run(self):
-        with Serial(self.__dev, 115200) as connection:
-            version = self.__check_version(connection)
-            self.__logger.info(f'Version: {version}')
-            self.__set_password(connection, self.__key)
-            self.__set_id(connection, self.__id)
-            channel, pan_id, addr = self.__scan(connection)
-            self.__logger.info(f'Channel: {channel}, Pan ID: {pan_id}, Addr; {addr}')
-            self.__set_reg(connection, 'S2', channel)
-            self.__set_reg(connection, 'S3', pan_id)
-            link_local_addr = self.__get_ip_from_mac(connection, addr)
-            self.__logger.info(f'IPv6 Link Local: {link_local_addr}')
-            self.__connect(connection, link_local_addr)
-            self.__logger.info(f'Connected to {link_local_addr} !')
-            connection.timeout = 2
-            while True:
-                data = self.__get_data(connection, link_local_addr)
-                self.__logger.info(f'Current power consumption: {data} W')
-                time.sleep(3)
+    def connect(self):
+        self.__connection = Serial(self.__dev, 115200)
+
+    def close(self):
+        self.__connection.close()
+        self.__connection = None
+
+    def initialize_params(self):
+        connection = self.__connection
+        if not self.__connection:
+            raise Exception('Connection is not initialized')
+        version = self.__check_version(connection)
+        self.__logger.info(f'Version: {version}')
+        self.__set_password(connection, self.__key)
+        self.__set_id(connection, self.__id)
+        channel, pan_id, addr = self.__scan(connection)
+        self.__logger.info(f'Channel: {channel}, Pan ID: {pan_id}, Addr; {addr}')
+        self.__set_reg(connection, 'S2', channel)
+        self.__set_reg(connection, 'S3', pan_id)
+        link_local_addr = self.__get_ip_from_mac(connection, addr)
+        self.__logger.info(f'IPv6 Link Local: {link_local_addr}')
+        self.__connect(connection, link_local_addr)
+        self.__logger.info(f'Connected to {link_local_addr} !')
+        self.__link_local_addr = link_local_addr
+
+    def __enter__(self):
+        self.connect()
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.close()
 
     def __write_line_serial(self, connection: Serial, line: str) -> None:
         if line.startswith('SKSETPWD'):
@@ -117,12 +130,18 @@ class SmartMeterConnection:
                 self.__read_line_serial(conn)
                 return
 
-    def __get_data(self, conn: Serial, addr: str) -> Optional[int]:
+    def get_data(self) -> Optional[int]:
+        if not self.__connection:
+            raise Exception('Connection is not initialized')
+
+        if not self.__link_local_addr:
+            raise Exception('Destination address is not set')
+
         request_str = b'\x10\x81\x00\x01\x05\xFF\x01\x02\x88\x01\x62\x01\xE7\x00'
-        self.__send_udp_serial(conn, addr, request_str)
-        assert self.__read_line_serial(conn).startswith('EVENT 21')
-        assert self.__read_line_serial(conn) == 'OK'
-        event = self.__read_line_serial(conn)
+        self.__send_udp_serial(self.__connection, self.__link_local_addr, request_str)
+        assert self.__read_line_serial(self.__connection).startswith('EVENT 21')
+        assert self.__read_line_serial(self.__connection) == 'OK'
+        event = self.__read_line_serial(self.__connection)
 
         if event.startswith('ERXUDP'):
             parts = event.split(' ')
