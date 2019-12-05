@@ -145,6 +145,8 @@ class SmartMeterConnection:
         if event.startswith('ERXUDP'):
             parts = event.split(' ')
             assert len(parts) == 9
+            length = int(parts[7], 16)
+            assert length * 2 == len(parts[8])
             packet = parts[8]
             e_data = packet[8:]
             seoj = e_data[0:6]
