@@ -127,16 +127,21 @@ class SmartMeterConnection:
                 raise RuntimeError('Failed to connect !')
             elif line.startswith('EVENT 25'):
                 self.__read_line_serial()
+                self.__connection.timeout = 1
                 return
 
     def get_data(self) -> Optional[int]:
         if not self.__connection:
             raise Exception('Connection is not initialized')
-
         if not self.__link_local_addr:
             raise Exception('Destination address is not set')
 
-        request_str = b'\x10\x81\x00\x01\x05\xFF\x01\x02\x88\x01\x62\x01\xE7\x00'
+        request_str = b'\x10\x81\x00\x01'
+        request_str += b'\x05\xFF\x01'
+        request_str += b'\x02\x88\x01'
+        request_str += b'\x62'
+        request_str += b'\x01'
+        request_str += b'\xE7\x00'
         self.__send_udp_serial(self.__link_local_addr, request_str)
         assert self.__read_line_serial().startswith('EVENT 21')
         assert self.__read_line_serial() == 'OK'
